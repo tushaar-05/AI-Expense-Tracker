@@ -1,0 +1,688 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const { alerts, recurringItems, targetMonth, targetYear } = $json;\nlet html = `<div style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden\"><div style=\"background:linear-gradient(135deg,#0D1B2A,#1a3a5c);padding:24px 28px\"><p style=\"margin:0 0 4px;color:#90e0ef;font-size:11px;letter-spacing:2px\">FINSMART AI</p><h1 style=\"margin:0;color:#fff;font-size:20px;font-weight:800\">Budget Alert</h1><p style=\"margin:4px 0 0;color:#94a3b8;font-size:13px\">${targetMonth} ${targetYear}</p></div><div style=\"padding:24px 28px\">`;\nfor (const a of alerts) {\n  const isOver = a.level === 'OVER';\n  html += `<div style=\"background:${isOver?'#fee2e2':'#fef3c7'};border:1px solid ${isOver?'#fca5a5':'#fde68a'};border-radius:8px;padding:14px 16px;margin-bottom:10px\"><p style=\"margin:0;font-size:14px;color:${isOver?'#991b1b':'#92400e'};font-weight:700\">${isOver?'🔴':'⚠️'} ${a.cat}</p><p style=\"margin:4px 0 0;font-size:13px;color:${isOver?'#7f1d1d':'#78350f'}\">₹${a.spent.toLocaleString()} of ₹${a.budget.toLocaleString()} budget (${a.pct}%)</p></div>`;\n}\nif (recurringItems && recurringItems.length > 0) {\n  html += `<div style=\"margin-top:16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px 16px\"><p style=\"margin:0 0 8px;font-size:14px;color:#0369a1;font-weight:700\">🔄 Recurring Expenses</p>${recurringItems.slice(0,3).map(r => `<p style=\"margin:0 0 4px;font-size:13px;color:#0c4a6e\">• <b>${r.desc}</b> — ${r.count}x = ₹${r.total.toLocaleString()}</p>`).join('')}</div>`;\n}\nhtml += `</div><div style=\"background:#0D1B2A;padding:14px 28px;text-align:center\"><p style=\"margin:0;color:#475569;font-size:11px\">FinSmart AI • ${targetMonth} ${targetYear}</p></div></div>`;\nreturn [{ json: { ...($json), alertEmailHtml: html } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1664,
+        1280
+      ],
+      "id": "33bdcabd-0c7a-43e7-84ac-ec253f895004",
+      "name": "Build Alert Email"
+    },
+    {
+      "parameters": {
+        "sendTo": "e25b070743@adypu.edu.in",
+        "subject": "=⚠️ FinSmart AI — Budget Alert: {{ $json.targetMonth }} {{ $json.targetYear }}",
+        "message": "={{ $json.alertEmailHtml }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1904,
+        1280
+      ],
+      "id": "b6d402e9-ed2b-4966-a0b9-dfb2d9836cc2",
+      "name": "Send Budget Alert Email",
+      "webhookId": "28e61db6-b55b-4270-afe9-439a47c24fa3",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dQjDPOgcs7dLcy0t",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const BUDGETS = {\n  Food: 3000, Transport: 1500, Housing: 5000,\n  Entertainment: 1000, Health: 2000, Education: 2000,\n  Shopping: 2000, Utilities: 1500, Other: 1000\n};\n\nconst COL_MONTH = 'Month', COL_YEAR = 'Year', COL_CAT = 'Category', COL_AMT = 'Amount (₹)';\nconst MONTH_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];\n\nconst allRows = $input.all().map(i => i.json).filter(r => r[COL_AMT] && r[COL_MONTH]);\n\nconst combos = [...new Set(allRows.map(r => `${String(r[COL_MONTH] || '').trim()}||${r[COL_YEAR]}`))]\n  .map(c => { const [m, y] = c.split('||'); return { month: m, year: parseInt(y) }; })\n  .sort((a, b) => a.year !== b.year ? b.year - a.year : MONTH_ORDER.indexOf(b.month) - MONTH_ORDER.indexOf(a.month));\n\nconst targetMonth = combos[0]?.month || '';\nconst targetYear  = combos[0]?.year  || 2026;\n\nconst monthRows = allRows.filter(r =>\n  String(r[COL_MONTH] || '').trim() === targetMonth && parseInt(r[COL_YEAR]) === targetYear\n);\n\nconst catSpend = {};\nfor (const row of monthRows) {\n  const cat = String(row[COL_CAT] || 'Other').trim();\n  catSpend[cat] = (catSpend[cat] || 0) + (parseFloat(row[COL_AMT]) || 0);\n}\n\nconst totalSpent  = Object.values(catSpend).reduce((s, v) => s + v, 0);\nconst totalBudget = Object.values(BUDGETS).reduce((s, v) => s + v, 0);\nconst overallPct  = totalBudget > 0 ? Math.round(totalSpent / totalBudget * 100) : 0;\n\nconst alerts = [];\nfor (const [cat, budget] of Object.entries(BUDGETS)) {\n  const spent = catSpend[cat] || 0;\n  const pct   = budget > 0 ? (spent / budget * 100) : 0;\n  if (pct >= 80) alerts.push({ cat, spent: Math.round(spent), budget, pct: Math.round(pct), level: pct >= 100 ? 'OVER' : 'WARNING' });\n}\n\nconst sc = overallPct >= 100 ? '#dc2626' : overallPct >= 80 ? '#d97706' : '#16a34a';\nconst sb = overallPct >= 100 ? '#fee2e2' : overallPct >= 80 ? '#fef3c7' : '#dcfce7';\n\nlet catRows = '';\nfor (const [cat, budget] of Object.entries(BUDGETS)) {\n  const spent = catSpend[cat] || 0;\n  const pct   = budget > 0 ? Math.round(spent / budget * 100) : 0;\n  const bar   = Math.min(pct, 100);\n  const col   = pct >= 100 ? '#dc2626' : pct >= 80 ? '#f59e0b' : '#00B4D8';\n  catRows += `<tr>\n    <td style=\"padding:8px 12px;font-size:13px;color:#1e293b\">${cat}</td>\n    <td style=\"padding:8px 12px;font-size:13px;font-weight:700\">₹${Math.round(spent).toLocaleString()}</td>\n    <td style=\"padding:8px 12px;font-size:13px;color:#64748b\">₹${budget.toLocaleString()}</td>\n    <td style=\"padding:8px 12px\">\n      <div style=\"background:#e2e8f0;border-radius:4px;height:8px;width:100px\">\n        <div style=\"background:${col};width:${bar}%;height:8px;border-radius:4px\"></div>\n      </div>\n    </td>\n    <td style=\"padding:8px 12px;font-size:13px;font-weight:700;color:${col}\">${pct}%</td>\n  </tr>`;\n}\n\nconst alertsHtml = alerts.length > 0\n  ? `<div style=\"margin-top:16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px 16px\">\n      <p style=\"margin:0 0 8px;font-size:14px;font-weight:700;color:#9a3412\">⚠️ Alerts</p>\n      ${alerts.map(a => `<p style=\"margin:0 0 4px;font-size:13px;color:#7c2d12\">${a.level === 'OVER' ? '🔴' : '🟡'} <b>${a.cat}</b>: ${a.pct}% used</p>`).join('')}\n    </div>`\n  : `<div style=\"margin-top:16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px\">\n      <p style=\"margin:0;font-size:13px;color:#166534\">✅ All categories within budget!</p>\n    </div>`;\n\nconst html = `\n<div style=\"font-family:Arial,sans-serif;max-width:650px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden\">\n  <div style=\"background:linear-gradient(135deg,#0D1B2A,#1a3a5c);padding:24px 28px\">\n    <p style=\"margin:0 0 4px;color:#90e0ef;font-size:11px;letter-spacing:2px\">FINSMART AI • DAILY SUMMARY</p>\n    <h1 style=\"margin:0;color:#fff;font-size:20px;font-weight:800\">${targetMonth} ${targetYear}</h1>\n    <p style=\"margin:6px 0 0;color:#94a3b8;font-size:13px\">${monthRows.length} transactions logged</p>\n  </div>\n  <div style=\"padding:20px 28px\">\n    <div style=\"background:${sb};border-radius:10px;padding:16px 20px;margin-bottom:20px\">\n      <p style=\"margin:0 0 2px;font-size:12px;color:#64748b;text-transform:uppercase\">Total Spent</p>\n      <p style=\"margin:0;font-size:26px;font-weight:800;color:${sc}\">\n        ₹${Math.round(totalSpent).toLocaleString()}\n        <span style=\"font-size:14px;font-weight:400\">of ₹${totalBudget.toLocaleString()} (${overallPct}%)</span>\n      </p>\n    </div>\n    <h3 style=\"margin:0 0 10px;font-size:13px;font-weight:800;color:#0D1B2A;text-transform:uppercase\">Category Breakdown</h3>\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-radius:8px;overflow:hidden;border:1px solid #e2e8f0\">\n      <thead>\n        <tr style=\"background:#0D1B2A\">\n          <th style=\"padding:8px 12px;text-align:left;color:#90e0ef;font-size:11px\">Category</th>\n          <th style=\"padding:8px 12px;text-align:left;color:#90e0ef;font-size:11px\">Spent</th>\n          <th style=\"padding:8px 12px;text-align:left;color:#90e0ef;font-size:11px\">Budget</th>\n          <th style=\"padding:8px 12px;text-align:left;color:#90e0ef;font-size:11px\">Progress</th>\n          <th style=\"padding:8px 12px;text-align:left;color:#90e0ef;font-size:11px\">%</th>\n        </tr>\n      </thead>\n      <tbody>${catRows}</tbody>\n    </table>\n    ${alertsHtml}\n  </div>\n  <div style=\"background:#0D1B2A;padding:14px 28px;text-align:center\">\n    <p style=\"margin:0;color:#475569;font-size:11px\">FinSmart AI • ${targetMonth} ${targetYear}</p>\n  </div>\n</div>`;\n\nreturn [{ json: { dailyEmailHtml: html, targetMonth, targetYear, totalSpent: Math.round(totalSpent), overallPct } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        1856
+      ],
+      "id": "273ec661-9043-4966-ad3b-9eaa6c29e89c",
+      "name": "Build Daily Summary Email"
+    },
+    {
+      "parameters": {
+        "sendTo": "e25b070743@adypu.edu.in",
+        "subject": "=📊 FinSmart AI — Daily Update: {{ $json.targetMonth }} {{ $json.targetYear }} | {{ $json.overallPct }}% of budget used",
+        "message": "={{ $json.dailyEmailHtml }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        816,
+        1856
+      ],
+      "id": "cc1f5761-2eb8-48c0-a1ed-573a9720ac12",
+      "name": "Send Daily Summary Email",
+      "webhookId": "b2d9b021-5328-446f-aaa0-5fda11297cf4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dQjDPOgcs7dLcy0t",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "formTitle": "FinSmart AI — Log Expense",
+        "formDescription": "Track your spending in seconds",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Date",
+              "fieldType": "date"
+            },
+            {
+              "fieldLabel": "Amount (₹)",
+              "fieldType": "number"
+            },
+            {
+              "fieldLabel": "Description"
+            },
+            {
+              "fieldLabel": "Payment Mode",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Cash"
+                  },
+                  {
+                    "option": "UPI"
+                  },
+                  {
+                    "option": "Card"
+                  },
+                  {
+                    "option": "Net Banking"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        48,
+        1392
+      ],
+      "id": "a1a108c1-c4fe-4322-bdfa-94b6c0dc883e",
+      "name": "On form submission2",
+      "webhookId": "72be6592-d16e-4a3f-b300-9475e80af407"
+    },
+    {
+      "parameters": {
+        "model": "deepseek/deepseek-v3.2",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        304,
+        1600
+      ],
+      "id": "4c9fdcb6-d8e1-47b2-a2e9-e5b70d6ad2f9",
+      "name": "OpenRouter Chat Model2",
+      "credentials": {
+        "openRouterApi": {
+          "id": "ergLr10ra7VRaXeN",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Categorize this expense, extract the month, year, calculate the week of the month, and give a short saving suggestion.\n\nReturn ONLY valid JSON:\n{\n\"category\": \"Food\",\n\"month\": \"April\",\n\"year\": \"2026\",\n\"week\": \"3\",\n\"suggestion\": \"Cook at home more often\"\n}\n\nCategories: Food, Transport, Housing, Entertainment, Health, Education, Shopping, Utilities, Other\n\nRules:\n- ONE category only\n- Real month name (January–December)\n- Valid 4-digit year\n- Week of month: Days 1–7=1, 8–14=2, 15–21=3, 22–28=4, 29–31=5\n- Suggestion max 10 words, practical and specific\n- No extra text, no explanation\n\nExpense: {{$json[\"Description\"]}}\nDate: {{$json[\"Date\"]}}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        352,
+        1392
+      ],
+      "id": "0e8712c3-f914-4faa-bf35-27c2f034a90f",
+      "name": "Basic LLM Chain2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const date = new Date($node['On form submission2'].json['Date']);\nconst aiOutput = JSON.parse($node['Basic LLM Chain2'].json.text);\n\nreturn [{\n  json: {\n    date: date.getDate(),\n    year: aiOutput.year,\n    month: date.toLocaleString('en-US', { month: 'long' }),\n    amount: $node['On form submission2'].json['Amount (₹)'],\n    description: $node['On form submission2'].json['Description'],\n    payment_mode: $node['On form submission2'].json['Payment Mode'],\n    category: aiOutput.category,\n    suggestion: aiOutput.suggestion,\n    week: aiOutput.week\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        1392
+      ],
+      "id": "a4b66c9f-c23d-444c-b07a-6ca3f09c25c5",
+      "name": "Format Data2"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yqIVrw4hYGTmRueWhNW43D5n6Lzm13rtZGKstnS5Dpc",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Raw Data",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Year": "={{ $json.year }}",
+            "Month": "={{ $json.month }}",
+            "Category": "={{ $json.category }}",
+            "Description": "={{ $json.description }}",
+            "Amount (₹)": "={{ $json.amount }}",
+            "Payment Mode": "={{ $json.payment_mode }}",
+            "AI Suggestion": "={{ $json.suggestion }}",
+            "Week (Month)": "={{ $json.week }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Month",
+              "displayName": "Month",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Year",
+              "displayName": "Year",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Category",
+              "displayName": "Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Amount (₹)",
+              "displayName": "Amount (₹)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Payment Mode",
+              "displayName": "Payment Mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Week (Month)",
+              "displayName": "Week (Month)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "AI Suggestion",
+              "displayName": "AI Suggestion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        944,
+        1392
+      ],
+      "id": "a0ab1767-32a6-439d-9f59-03606e96bcc9",
+      "name": "Save to Google Sheets2",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "QEWGpitBnhOb9ARj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── BUDGET ALERT CHECK ──────────────────────────────────────\n// Reads all rows and checks if current month spending in any\n// category has crossed 80% or 100% of the configured budget.\n// Edit BUDGETS below to match your monthly limits.\n\nconst BUDGETS = {\n  Food: 10000,\n  Transport: 10000,\n  Housing: 10000,\n  Entertainment: 10000,\n  Health: 10000,\n  Education: 10000,\n  Shopping: 10000,\n  Utilities: 10000,\n  Other: 10000\n};\n\nconst COL_MONTH = 'Month';\nconst COL_YEAR  = 'Year';\nconst COL_CAT   = 'Category';\nconst COL_AMT   = 'Amount (\\u20b9)';\nconst COL_DESC  = 'Description';\nconst COL_SUB   = 'Submitted By';\n\nconst allRows = $input.all().map(i => i.json).filter(r => r[COL_AMT] && r[COL_MONTH]);\n\nconst MONTH_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];\nconst combos = [...new Set(allRows.map(r => `${(r[COL_MONTH]||'').trim()}||${r[COL_YEAR]}`))]\n  .map(c => { const [m,y] = c.split('||'); return { month: m, year: parseInt(y) }; })\n  .sort((a, b) => a.year !== b.year ? b.year - a.year : MONTH_ORDER.indexOf(b.month) - MONTH_ORDER.indexOf(a.month));\n\nconst targetMonth = combos[0]?.month || 'April';\nconst targetYear  = combos[0]?.year  || 2026;\n\nconst monthRows = allRows.filter(r =>\n  (r[COL_MONTH]||'').trim() === targetMonth && parseInt(r[COL_YEAR]) === targetYear\n);\n\n// Spending per category this month\nconst catSpend = {};\nfor (const row of monthRows) {\n  const cat = (row[COL_CAT] || 'Other').trim();\n  catSpend[cat] = (catSpend[cat] || 0) + (parseFloat(row[COL_AMT]) || 0);\n}\n\n// Recurring expense detection (same description 3+ times)\nconst descCount = {};\nfor (const row of monthRows) {\n  const d = (row[COL_DESC] || '').trim().toLowerCase();\n  if (d) descCount[d] = (descCount[d] || 0) + 1;\n}\nconst recurringItems = Object.entries(descCount)\n  .filter(([, c]) => c >= 3)\n  .map(([desc, count]) => {\n    const total = monthRows\n      .filter(r => (r[COL_DESC]||'').trim().toLowerCase() === desc)\n      .reduce((s, r) => s + (parseFloat(r[COL_AMT]) || 0), 0);\n    return { desc, count, total: Math.round(total) };\n  });\n\n// Budget alerts\nconst alerts = [];\nfor (const [cat, budget] of Object.entries(BUDGETS)) {\n  const spent = catSpend[cat] || 0;\n  const pct = budget > 0 ? (spent / budget * 100) : 0;\n  if (pct >= 100) {\n    alerts.push({ cat, spent: Math.round(spent), budget, pct: Math.round(pct), level: 'OVER' });\n  } else if (pct >= 80) {\n    alerts.push({ cat, spent: Math.round(spent), budget, pct: Math.round(pct), level: 'WARNING' });\n  }\n}\n\n// Per-member totals\nconst memberMap = {};\nfor (const row of monthRows) {\n  const member = (row[COL_SUB] || 'Unknown').trim();\n  memberMap[member] = (memberMap[member] || 0) + (parseFloat(row[COL_AMT]) || 0);\n}\nconst memberData = Object.entries(memberMap)\n  .map(([name, amt]) => ({ name, amt: Math.round(amt) }))\n  .sort((a, b) => b.amt - a.amt);\n\nreturn [{ json: {\n  targetMonth, targetYear,\n  catSpend: Object.fromEntries(Object.entries(catSpend).map(([k,v]) => [k, Math.round(v)])),\n  budgets: BUDGETS,\n  alerts,\n  recurringItems,\n  memberData,\n  allRows,\n  monthRows\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        1392
+      ],
+      "id": "b78b5529-5d5d-44da-9786-df0a0bcc99ac",
+      "name": "Budget & Recurring Check1",
+      "notes": "Edit the BUDGETS object inside this node to set monthly limits per category."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-alert",
+              "leftValue": "={{ $json.alerts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        1392
+      ],
+      "id": "9547f4dc-8335-463d-93b2-ccaaeb60cff4",
+      "name": "Has Budget Alert?1"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yqIVrw4hYGTmRueWhNW43D5n6Lzm13rtZGKstnS5Dpc",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Raw Data",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1760,
+        1536
+      ],
+      "id": "d76201a8-6f37-4905-b10b-81a4e736c267",
+      "name": "Read Raw Data from Sheets2",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "QEWGpitBnhOb9ARj",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const BUDGETS = {\n  Food: 3000, Transport: 1500, Housing: 5000,\n  Entertainment: 1000, Health: 2000, Education: 2000,\n  Shopping: 2000, Utilities: 1500, Other: 1000\n};\n\nconst COL_MONTH = 'Month', COL_YEAR = 'Year', COL_CAT = 'Category';\nconst COL_DESC = 'Description', COL_AMT = 'Amount (₹)';\nconst COL_PAY = 'Payment Mode', COL_WEEK = 'Week (Month)';\nconst COL_AI = 'AI Suggestion', COL_SUB = 'Submitted By';\n\nconst MONTH_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December'];\n\nconst allRows = $input.all().map(i => i.json).filter(r => r[COL_AMT] && r[COL_MONTH]);\n\nconst combos = [...new Set(allRows.map(r => `${String(r[COL_MONTH]||'').trim()}||${r[COL_YEAR]}`))]\n  .map(c => { const [m,y] = c.split('||'); return { month: m, year: parseInt(y) }; })\n  .sort((a, b) => a.year !== b.year ? b.year - a.year : MONTH_ORDER.indexOf(b.month) - MONTH_ORDER.indexOf(a.month));\n\nconst targetMonth = combos[0]?.month || 'April';\nconst targetYear  = combos[0]?.year  || 2026;\nconst prevCombo   = combos[1];\nconst reportPeriod = `${targetMonth} ${targetYear}`;\n\nconst monthRows = allRows.filter(r =>\n  String(r[COL_MONTH]||'').trim() === targetMonth && parseInt(r[COL_YEAR]) === targetYear\n);\nconst prevRows = prevCombo ? allRows.filter(r =>\n  String(r[COL_MONTH]||'').trim() === prevCombo.month && parseInt(r[COL_YEAR]) === prevCombo.year\n) : [];\n\n// ── Core KPIs ────────────────────────────────────────────────\nconst totalSpent    = monthRows.reduce((s, r) => s + (parseFloat(r[COL_AMT]) || 0), 0);\nconst prevTotal     = prevRows.reduce((s, r) => s + (parseFloat(r[COL_AMT]) || 0), 0);\nconst txCount       = monthRows.length;\nconst avgTxn        = txCount > 0 ? totalSpent / txCount : 0;\nconst momChange     = prevTotal > 0 ? ((totalSpent - prevTotal) / prevTotal * 100).toFixed(1) : null;\n\nconst biggest = monthRows.reduce((max, r) => {\n  const a = parseFloat(r[COL_AMT]) || 0;\n  return a > max.amt ? { amt: a, desc: String(r[COL_DESC]||'-'), cat: String(r[COL_CAT]||'-') } : max;\n}, { amt: 0, desc: '-', cat: '-' });\n\n// ── Category analysis with budget comparison ─────────────────\nconst catMap = {}, catTxCount = {}, prevCatMap = {};\nfor (const row of monthRows) {\n  const cat = String(row[COL_CAT] || 'Other').trim();\n  catMap[cat]     = (catMap[cat]     || 0) + (parseFloat(row[COL_AMT]) || 0);\n  catTxCount[cat] = (catTxCount[cat] || 0) + 1;\n}\nfor (const row of prevRows) {\n  const cat = String(row[COL_CAT] || 'Other').trim();\n  prevCatMap[cat] = (prevCatMap[cat] || 0) + (parseFloat(row[COL_AMT]) || 0);\n}\n\nconst catData = Object.entries(catMap).map(([name, spent]) => {\n  const budget = BUDGETS[name] || 0;\n  const pct    = totalSpent > 0 ? (spent / totalSpent * 100).toFixed(1) : '0.0';\n  const budgetPct = budget > 0 ? Math.min(Math.round(spent / budget * 100), 100) : 0;\n  const budgetStatus = budget === 0 ? 'N/A' : spent > budget ? 'OVER' : spent / budget >= 0.8 ? 'WARNING' : 'OK';\n  const prevSpent = prevCatMap[name] || 0;\n  const momDelta  = prevSpent > 0 ? ((spent - prevSpent) / prevSpent * 100).toFixed(0) : null;\n  return { name, spent: Math.round(spent), txns: catTxCount[name] || 0, pct, budget, budgetPct, budgetStatus, momDelta };\n}).sort((a, b) => b.spent - a.spent);\n\nconst topCategory   = catData[0]?.name || '—';\nconst totalBudget   = Object.values(BUDGETS).reduce((s, v) => s + v, 0);\nconst budgetUsedPct = totalBudget > 0 ? Math.round(totalSpent / totalBudget * 100) : 0;\n\n// ── Payment Mode ─────────────────────────────────────────────\nconst payMap = {};\nfor (const row of monthRows) {\n  const mode = String(row[COL_PAY] || 'Other').trim();\n  payMap[mode] = (payMap[mode] || 0) + (parseFloat(row[COL_AMT]) || 0);\n}\nconst payData = Object.entries(payMap)\n  .map(([mode, amt]) => ({ mode, amt: Math.round(amt), pct: totalSpent > 0 ? (amt / totalSpent * 100).toFixed(1) : '0.0' }))\n  .sort((a, b) => b.amt - a.amt);\n\n// ── Weekly breakdown ─────────────────────────────────────────\nconst weekMap = {};\nfor (const row of monthRows) {\n  const wk = row[COL_WEEK] ? `Week ${row[COL_WEEK]}` : 'Unknown';\n  weekMap[wk] = (weekMap[wk] || 0) + (parseFloat(row[COL_AMT]) || 0);\n}\nconst weekData = Object.entries(weekMap)\n  .map(([wk, amt]) => ({ wk, amt: Math.round(amt) }))\n  .sort((a, b) => a.wk.localeCompare(b.wk));\n\n// ── Recurring expenses ────────────────────────────────────────\nconst descCount = {};\nfor (const row of monthRows) {\n  const d = String(row[COL_DESC] || '').trim().toLowerCase();\n  if (d) descCount[d] = (descCount[d] || 0) + 1;\n}\nconst recurringItems = Object.entries(descCount)\n  .filter(([, c]) => c >= 3)\n  .map(([desc, count]) => {\n    const total = monthRows\n      .filter(r => String(r[COL_DESC]||'').trim().toLowerCase() === desc)\n      .reduce((s, r) => s + (parseFloat(r[COL_AMT]) || 0), 0);\n    return { desc, count, total: Math.round(total) };\n  })\n  .sort((a, b) => b.total - a.total);\n\n// ── Per-member totals ────────────────────────────────────────\nconst memberMap = {};\nfor (const row of monthRows) {\n  const member = String(row[COL_SUB] || 'Unknown').trim();\n  memberMap[member] = (memberMap[member] || 0) + (parseFloat(row[COL_AMT]) || 0);\n}\nconst memberData = Object.entries(memberMap)\n  .map(([name, amt]) => ({ name, amt: Math.round(amt), pct: totalSpent > 0 ? (amt / totalSpent * 100).toFixed(1) : '0.0' }))\n  .sort((a, b) => b.amt - a.amt);\n\n// ── AI Suggestions ───────────────────────────────────────────\nconst aiSuggestions = [...new Set(\n  monthRows.map(r => String(r[COL_AI] || '').trim()).filter(s => s && s !== '#N/A' && s.length > 3)\n)];\n\n// ── All transactions ─────────────────────────────────────────\nconst allTx = [...monthRows].sort((a, b) => (a[COL_WEEK]||0) - (b[COL_WEEK]||0));\n\n// ══════════════════════════════════════════════════════════════\n// BUILD HTML REPORT\n// ══════════════════════════════════════════════════════════════\nconst CAT_COLORS = {\n  Food:'#00B4D8', Transport:'#F4A261', Housing:'#2EC4B6',\n  Entertainment:'#E63946', Health:'#7B2FBE', Education:'#F77F00',\n  Shopping:'#4CC9F0', Utilities:'#06D6A0', Other:'#94A3B8'\n};\nconst PAY_COLORS = { Cash:'#2EC4B6', Card:'#00B4D8', UPI:'#F4A261', 'Net Banking':'#7B2FBE', Other:'#94A3B8' };\nconst STATUS_STYLE = { OK: 'color:#166534;background:#dcfce7', WARNING: 'color:#92400e;background:#fef3c7', OVER: 'color:#991b1b;background:#fee2e2', 'N/A': 'color:#94a3b8;background:#f1f5f9' };\nconst STATUS_ICON  = { OK: '✅', WARNING: '⚠️', OVER: '🔴', 'N/A': '—' };\n\nconst momBadge = momChange !== null\n  ? `<span style=\"font-size:12px;padding:2px 8px;border-radius:12px;${parseFloat(momChange) <= 0 ? 'background:#dcfce7;color:#166534' : 'background:#fee2e2;color:#991b1b'}\">${parseFloat(momChange) > 0 ? '▲' : '▼'} ${Math.abs(momChange)}% vs ${prevCombo?.month}</span>`\n  : '';\n\nconst budgetBadge = `<span style=\"font-size:12px;padding:2px 8px;border-radius:12px;${budgetUsedPct >= 100 ? 'background:#fee2e2;color:#991b1b' : budgetUsedPct >= 80 ? 'background:#fef3c7;color:#92400e' : 'background:#dcfce7;color:#166534'}\">${budgetUsedPct}% of total budget</span>`;\n\nconst catRows = catData.map((c, i) => {\n  const col = CAT_COLORS[c.name] || '#94A3B8';\n  const bg  = i % 2 === 0 ? '#ffffff' : '#f8fafc';\n  const statusStyle = STATUS_STYLE[c.budgetStatus] || STATUS_STYLE['N/A'];\n  const statusIcon  = STATUS_ICON[c.budgetStatus]  || '—';\n  const momArrow = c.momDelta !== null\n    ? (parseFloat(c.momDelta) > 0\n      ? `<span style=\"color:#dc2626;font-size:11px\">▲${c.momDelta}%</span>`\n      : `<span style=\"color:#16a34a;font-size:11px\">▼${Math.abs(c.momDelta)}%</span>`)\n    : '<span style=\"color:#94a3b8;font-size:11px\">—</span>';\n  return `<tr style=\"background:${bg}\">\n    <td style=\"padding:10px 12px;font-size:13px;color:#1e293b;font-weight:500\"><span style=\"display:inline-block;width:9px;height:9px;border-radius:50%;background:${col};margin-right:7px\"></span>${c.name}</td>\n    <td style=\"padding:10px 12px;font-size:13px;font-weight:700;color:#0f172a\">₹${c.spent.toLocaleString()}</td>\n    <td style=\"padding:10px 12px;font-size:13px;color:#475569\">${c.pct}%</td>\n    <td style=\"padding:10px 12px;font-size:12px\">\n      <div style=\"display:flex;align-items:center;gap:6px\">\n        <div style=\"background:#e2e8f0;border-radius:4px;height:8px;width:90px;flex-shrink:0\">\n          <div style=\"background:${c.budgetStatus==='OVER'?'#dc2626':c.budgetStatus==='WARNING'?'#f59e0b':col};width:${c.budgetPct}%;height:8px;border-radius:4px\"></div>\n        </div>\n        <span style=\"color:#64748b\">${c.budget > 0 ? '₹'+c.budget.toLocaleString() : '—'}</span>\n      </div>\n    </td>\n    <td style=\"padding:10px 12px;text-align:center\"><span style=\"padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600;${statusStyle}\">${statusIcon} ${c.budgetStatus}</span></td>\n    <td style=\"padding:10px 12px;text-align:center\">${momArrow}</td>\n    <td style=\"padding:10px 12px;font-size:12px;color:#64748b;text-align:center\">${c.txns}</td>\n  </tr>`;\n}).join('');\n\nconst payRows = payData.map((p, i) => {\n  const col = PAY_COLORS[p.mode] || '#94A3B8';\n  const bg  = i % 2 === 0 ? '#ffffff' : '#f8fafc';\n  return `<tr style=\"background:${bg}\">\n    <td style=\"padding:9px 12px;font-size:13px;font-weight:500;color:#1e293b\"><span style=\"display:inline-block;width:9px;height:9px;border-radius:50%;background:${col};margin-right:7px\"></span>${p.mode}</td>\n    <td style=\"padding:9px 12px;font-size:13px;font-weight:700;color:#0f172a\">₹${p.amt.toLocaleString()}</td>\n    <td style=\"padding:9px 12px;font-size:13px;color:#475569\">${p.pct}%</td>\n  </tr>`;\n}).join('');\n\nconst maxWeekAmt = Math.max(...weekData.map(w => w.amt), 1);\nconst weekRows = weekData.map((w, i) => {\n  const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';\n  const barPct = Math.round((w.amt / maxWeekAmt) * 100);\n  return `<tr style=\"background:${bg}\">\n    <td style=\"padding:9px 12px;font-size:13px;font-weight:500;color:#1e293b\">${w.wk}</td>\n    <td style=\"padding:9px 12px;font-size:13px;font-weight:700;color:#0f172a\">₹${w.amt.toLocaleString()}</td>\n    <td style=\"padding:9px 12px\">\n      <div style=\"background:#e2e8f0;border-radius:4px;height:8px;width:110px\">\n        <div style=\"background:#00B4D8;width:${barPct}%;height:8px;border-radius:4px\"></div>\n      </div>\n    </td>\n  </tr>`;\n}).join('');\n\nconst txRows = allTx.map((row, i) => {\n  const cat  = String(row[COL_CAT]  || 'Other').trim();\n  const desc = String(row[COL_DESC] || '—').trim();\n  const amt  = parseFloat(row[COL_AMT] || 0);\n  const pay  = String(row[COL_PAY]  || '—').trim();\n  const wk   = row[COL_WEEK]  ? `Week ${row[COL_WEEK]}` : '—';\n  const sub  = String(row[COL_SUB]  || '—').trim();\n  const col  = CAT_COLORS[cat] || '#94A3B8';\n  const bg   = i % 2 === 0 ? '#ffffff' : '#f8fafc';\n  return `<tr style=\"background:${bg}\">\n    <td style=\"padding:8px 10px;font-size:12px;color:#64748b\">${wk}</td>\n    <td style=\"padding:8px 10px;font-size:12px;color:#1e293b;font-weight:500\">${desc}</td>\n    <td style=\"padding:8px 10px\"><span style=\"background:${col}22;color:${col};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600\">${cat}</span></td>\n    <td style=\"padding:8px 10px;font-size:12px;color:#475569\">${pay}</td>\n    <td style=\"padding:8px 10px;font-size:12px;color:#64748b\">${sub}</td>\n    <td style=\"padding:8px 10px;font-size:12px;font-weight:700;color:#0f172a;text-align:right\">₹${amt.toLocaleString()}</td>\n  </tr>`;\n}).join('');\n\nconst memberRows = memberData.map((m, i) => {\n  const bg   = i % 2 === 0 ? '#ffffff' : '#f8fafc';\n  const pct  = Math.round(parseFloat(m.pct));\n  return `<tr style=\"background:${bg}\">\n    <td style=\"padding:9px 12px;font-size:13px;font-weight:500;color:#1e293b\">${m.name}</td>\n    <td style=\"padding:9px 12px;font-size:13px;font-weight:700;color:#0f172a\">₹${m.amt.toLocaleString()}</td>\n    <td style=\"padding:9px 12px;font-size:13px;color:#475569\">${m.pct}%</td>\n    <td style=\"padding:9px 12px\">\n      <div style=\"background:#e2e8f0;border-radius:4px;height:8px;width:100px\">\n        <div style=\"background:#7B2FBE;width:${pct}%;height:8px;border-radius:4px\"></div>\n      </div>\n    </td>\n  </tr>`;\n}).join('');\n\nconst recurringBlock = recurringItems.length > 0\n  ? recurringItems.map(r => `<div style=\"background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 14px;margin-bottom:8px\"><p style=\"margin:0;font-size:13px;color:#7c2d12\">🔄 <b>${r.desc}</b> — ${r.count} times = ₹${r.total.toLocaleString()}</p></div>`).join('')\n  : '<p style=\"font-size:13px;color:#166534;margin:0\">✅ No recurring spends detected this month.</p>';\n\nconst alertsBlock = catData.filter(c => c.budgetStatus !== 'OK' && c.budgetStatus !== 'N/A').map(c =>\n  `<div style=\"background:${c.budgetStatus==='OVER'?'#fee2e2':'#fef3c7'};border:1px solid ${c.budgetStatus==='OVER'?'#fca5a5':'#fde68a'};border-radius:8px;padding:10px 14px;margin-bottom:8px\">\n    <p style=\"margin:0;font-size:13px;color:${c.budgetStatus==='OVER'?'#991b1b':'#92400e'}\">${c.budgetStatus==='OVER'?'🔴':'⚠️'} <b>${c.name}</b>: ₹${c.spent.toLocaleString()} / ₹${c.budget.toLocaleString()} budget (${c.budgetPct}%)</p>\n  </div>`\n).join('') || '<p style=\"font-size:13px;color:#166534;margin:0\">✅ All categories within budget.</p>';\n\nconst aiBlock = aiSuggestions.length > 0\n  ? aiSuggestions.map(s => `<p style=\"margin:0 0 8px;color:#166534;font-size:13px\">💡 ${s}</p>`).join('')\n  : '<p style=\"margin:0;color:#166534;font-size:13px\">✅ Great spending habits this month!</p>';\n\nconst htmlReport = `<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>\n<body style=\"margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif\">\n<div style=\"max-width:720px;margin:28px auto;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 6px 32px rgba(0,0,0,0.10)\">\n\n  <div style=\"background:linear-gradient(135deg,#0D1B2A 60%,#1a3a5c 100%);padding:30px 36px 24px\">\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n      <td>\n        <p style=\"margin:0 0 3px;color:#90e0ef;font-size:11px;letter-spacing:2px;text-transform:uppercase\">FinSmart AI • Student Finance Tracker</p>\n        <h1 style=\"margin:0 0 5px;color:#fff;font-size:24px;font-weight:800\">Monthly Expense Report</h1>\n        <p style=\"margin:0;color:#94a3b8;font-size:13px\">${reportPeriod} &nbsp;|&nbsp; ${txCount} transactions &nbsp;|&nbsp; ${momBadge} ${budgetBadge}</p>\n      </td>\n      <td style=\"text-align:right;vertical-align:top\">\n        <div style=\"background:rgba(255,255,255,0.08);border-radius:12px;padding:12px 16px;display:inline-block\">\n          <p style=\"margin:0 0 2px;color:#90e0ef;font-size:11px;text-transform:uppercase;letter-spacing:1px\">Total Spent</p>\n          <p style=\"margin:0;color:#fff;font-size:26px;font-weight:800\">₹${Math.round(totalSpent).toLocaleString()}</p>\n        </div>\n      </td>\n    </tr></table>\n  </div>\n\n  <div style=\"background:#f8fafc;padding:18px 36px;border-bottom:1px solid #e2e8f0\">\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n      <td style=\"width:20%;padding-right:8px\"><div style=\"background:#fff;border-radius:12px;padding:14px;border:1px solid #e2e8f0;text-align:center\"><p style=\"margin:0 0 3px;font-size:20px;font-weight:800;color:#0D1B2A\">${txCount}</p><p style=\"margin:0;font-size:10px;color:#94a3b8;text-transform:uppercase\">Transactions</p></div></td>\n      <td style=\"width:20%;padding:0 8px\"><div style=\"background:#fff;border-radius:12px;padding:14px;border:1px solid #e2e8f0;text-align:center\"><p style=\"margin:0 0 3px;font-size:20px;font-weight:800;color:#F4A261\">₹${Math.round(avgTxn).toLocaleString()}</p><p style=\"margin:0;font-size:10px;color:#94a3b8;text-transform:uppercase\">Avg per Txn</p></div></td>\n      <td style=\"width:20%;padding:0 8px\"><div style=\"background:#fff;border-radius:12px;padding:14px;border:1px solid #e2e8f0;text-align:center\"><p style=\"margin:0 0 3px;font-size:17px;font-weight:800;color:#00B4D8\">${topCategory}</p><p style=\"margin:0;font-size:10px;color:#94a3b8;text-transform:uppercase\">Top Category</p></div></td>\n      <td style=\"width:20%;padding:0 8px\"><div style=\"background:#fff;border-radius:12px;padding:14px;border:1px solid #e2e8f0;text-align:center\"><p style=\"margin:0 0 3px;font-size:17px;font-weight:800;color:#E63946\">₹${biggest.amt.toLocaleString()}</p><p style=\"margin:0;font-size:10px;color:#94a3b8;text-transform:uppercase\">Biggest Spend</p></div></td>\n      <td style=\"width:20%;padding-left:8px\"><div style=\"background:#fff;border-radius:12px;padding:14px;border:1px solid #e2e8f0;text-align:center\"><p style=\"margin:0 0 3px;font-size:20px;font-weight:800;color:${budgetUsedPct>=100?'#dc2626':budgetUsedPct>=80?'#d97706':'#16a34a'}\">${budgetUsedPct}%</p><p style=\"margin:0;font-size:10px;color:#94a3b8;text-transform:uppercase\">Budget Used</p></div></td>\n    </tr></table>\n  </div>\n\n  <div style=\"padding:26px 36px 0\">\n    <h2 style=\"margin:0 0 4px;font-size:14px;font-weight:800;color:#0D1B2A;text-transform:uppercase;letter-spacing:0.5px\">📊 Budget vs Actual — ${reportPeriod}</h2>\n    <p style=\"margin:0 0 12px;font-size:12px;color:#94a3b8\">Budget limits • Status • Month-over-Month trend</p>\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-radius:10px;overflow:hidden;border:1px solid #e2e8f0\">\n      <thead><tr style=\"background:#0D1B2A\">\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase;letter-spacing:0.8px\">Category</th>\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Spent</th>\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">% Total</th>\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Budget</th>\n        <th style=\"padding:9px 12px;text-align:center;color:#90e0ef;font-size:11px;text-transform:uppercase\">Status</th>\n        <th style=\"padding:9px 12px;text-align:center;color:#90e0ef;font-size:11px;text-transform:uppercase\">MoM</th>\n        <th style=\"padding:9px 12px;text-align:center;color:#90e0ef;font-size:11px;text-transform:uppercase\">Txns</th>\n      </tr></thead>\n      <tbody>${catRows}</tbody>\n      <tfoot><tr style=\"background:#f8fafc\">\n        <td style=\"padding:10px 12px;font-weight:800;font-size:13px;color:#0D1B2A\">TOTAL</td>\n        <td style=\"padding:10px 12px;font-weight:800;font-size:13px;color:#0D1B2A\">₹${Math.round(totalSpent).toLocaleString()}</td>\n        <td style=\"padding:10px 12px;font-size:13px;color:#0D1B2A\">100%</td>\n        <td style=\"padding:10px 12px;font-size:13px;color:#64748b\">₹${totalBudget.toLocaleString()}</td>\n        <td colspan=\"3\" style=\"padding:10px 12px;font-size:12px;color:#64748b\">${txCount} transactions total</td>\n      </tr></tfoot>\n    </table>\n  </div>\n\n  <div style=\"padding:22px 36px 0\">\n    <h2 style=\"margin:0 0 4px;font-size:14px;font-weight:800;color:#0D1B2A;text-transform:uppercase;letter-spacing:0.5px\">🚨 Budget Alerts</h2>\n    <p style=\"margin:0 0 12px;font-size:12px;color:#94a3b8\">Categories near or over budget</p>\n    ${alertsBlock}\n  </div>\n\n  <div style=\"padding:22px 36px 0\">\n    <h2 style=\"margin:0 0 4px;font-size:14px;font-weight:800;color:#0D1B2A;text-transform:uppercase;letter-spacing:0.5px\">🔄 Recurring Expenses</h2>\n    <p style=\"margin:0 0 12px;font-size:12px;color:#94a3b8\">Merchants appearing 3+ times this month</p>\n    ${recurringBlock}\n  </div>\n\n  <div style=\"padding:22px 36px 0\">\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr valign=\"top\">\n      <td style=\"width:48%;padding-right:12px\">\n        <h2 style=\"margin:0 0 4px;font-size:14px;font-weight:800;color:#0D1B2A;text-transform:uppercase\">💳 By Payment Mode</h2>\n        <p style=\"margin:0 0 10px;font-size:12px;color:#94a3b8\">How you paid</p>\n        <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-radius:10px;overflow:hidden;border:1px solid #e2e8f0\">\n          <thead><tr style=\"background:#0D1B2A\">\n            <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Mode</th>\n            <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Total</th>\n            <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">%</th>\n          </tr></thead>\n          <tbody>${payRows}</tbody>\n        </table>\n      </td>\n      <td style=\"width:52%;padding-left:12px\">\n        <h2 style=\"margin:0 0 4px;font-size:14px;font-weight:800;color:#0D1B2A;text-transform:uppercase\">📅 Weekly Trend</h2>\n        <p style=\"margin:0 0 10px;font-size:12px;color:#94a3b8\">Spending by week</p>\n        <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-radius:10px;overflow:hidden;border:1px solid #e2e8f0\">\n          <thead><tr style=\"background:#0D1B2A\">\n            <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Week</th>\n            <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Amount</th>\n            <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Bar</th>\n          </tr></thead>\n          <tbody>${weekRows}</tbody>\n        </table>\n      </td>\n    </tr></table>\n  </div>\n\n  ${memberData.length > 1 ? `\n  <div style=\"padding:22px 36px 0\">\n    <h2 style=\"margin:0 0 4px;font-size:14px;font-weight:800;color:#0D1B2A;text-transform:uppercase\">👥 Member Breakdown</h2>\n    <p style=\"margin:0 0 10px;font-size:12px;color:#94a3b8\">Spending split by household member</p>\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-radius:10px;overflow:hidden;border:1px solid #e2e8f0\">\n      <thead><tr style=\"background:#0D1B2A\">\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Member</th>\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Spent</th>\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">%</th>\n        <th style=\"padding:9px 12px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Bar</th>\n      </tr></thead>\n      <tbody>${memberRows}</tbody>\n    </table>\n  </div>` : ''}\n\n  <div style=\"padding:22px 36px 0\">\n    <h2 style=\"margin:0 0 4px;font-size:14px;font-weight:800;color:#0D1B2A;text-transform:uppercase\">📋 All Transactions — ${reportPeriod}</h2>\n    <p style=\"margin:0 0 10px;font-size:12px;color:#94a3b8\">${txCount} transactions across all weeks</p>\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-radius:10px;overflow:hidden;border:1px solid #e2e8f0\">\n      <thead><tr style=\"background:#0D1B2A\">\n        <th style=\"padding:8px 10px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Week</th>\n        <th style=\"padding:8px 10px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Description</th>\n        <th style=\"padding:8px 10px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Category</th>\n        <th style=\"padding:8px 10px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">Payment</th>\n        <th style=\"padding:8px 10px;text-align:left;color:#90e0ef;font-size:11px;text-transform:uppercase\">By</th>\n        <th style=\"padding:8px 10px;text-align:right;color:#90e0ef;font-size:11px;text-transform:uppercase\">Amount</th>\n      </tr></thead>\n      <tbody>${txRows}</tbody>\n    </table>\n  </div>\n\n  <div style=\"padding:22px 36px 0\">\n    <div style=\"background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:18px 22px\">\n      <h3 style=\"margin:0 0 10px;font-size:14px;font-weight:800;color:#15803d\">🤖 AI Smart Suggestions for Next Month</h3>\n      ${aiBlock}\n    </div>\n  </div>\n\n  <div style=\"padding:18px 36px 0\">\n    <div style=\"background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px 22px\">\n      <h3 style=\"margin:0 0 6px;font-size:14px;font-weight:800;color:#9a3412\">🔥 Biggest Expense This Month</h3>\n      <p style=\"margin:0;font-size:13px;color:#7c2d12\"><b>${biggest.desc}</b> &nbsp;|&nbsp; ${biggest.cat} &nbsp;|&nbsp; <b>₹${biggest.amt.toLocaleString()}</b></p>\n    </div>\n  </div>\n\n  <div style=\"margin-top:26px;background:#0D1B2A;padding:18px 36px;text-align:center\">\n    <p style=\"margin:0 0 3px;color:#90e0ef;font-size:13px;font-weight:700\">FinSmart AI — AI Personal Finance Tracker & Advisor</p>\n    <p style=\"margin:0;color:#475569;font-size:11px\">Team FinSmart AI &nbsp;•&nbsp; Department of Computer Science &nbsp;•&nbsp; ${reportPeriod}</p>\n  </div>\n</div>\n</body></html>`;\n\nreturn [{ json: { reportPeriod, totalSpent: Math.round(totalSpent), txCount, avgTxn: Math.round(avgTxn), topCategory, biggestExpense: biggest.amt, biggestDesc: biggest.desc, budgetUsedPct, momChange, htmlReport } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        1536
+      ],
+      "id": "ba3f046d-8423-457f-bb02-68424356030f",
+      "name": "Compute Analytics & Build HTML Report2",
+      "notes": "Edit BUDGETS object at top of this node to set your monthly category limits."
+    },
+    {
+      "parameters": {
+        "sendTo": "e25b070743@adypu.edu.in",
+        "subject": "=FinSmart AI — {{ $json.reportPeriod }} Report | ₹{{ $json.totalSpent }} spent | {{ $json.budgetUsedPct }}% of budget",
+        "message": "={{ $json.htmlReport }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2240,
+        1536
+      ],
+      "id": "6e3f3d19-610c-4c29-9eb7-20fcdc79dea1",
+      "name": "Send Report via Gmail2",
+      "webhookId": "fd05a409-d1c9-4127-b5fe-1238c1eacd58",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dQjDPOgcs7dLcy0t",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "status",
+              "value": "=✅ Report sent for {{ $('Compute Analytics & Build HTML Report2').item.json.reportPeriod }}",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "sentAt",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "summary",
+              "value": "=Total: ₹{{ $('Compute Analytics & Build HTML Report2').item.json.totalSpent }} | Txns: {{ $('Compute Analytics & Build HTML Report2').item.json.txCount }} | Top: {{ $('Compute Analytics & Build HTML Report2').item.json.topCategory }} | Budget: {{ $('Compute Analytics & Build HTML Report2').item.json.budgetUsedPct }}% used | MoM: {{ $('Compute Analytics & Build HTML Report2').item.json.momChange }}%",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2480,
+        1536
+      ],
+      "id": "ff2cc774-bfa0-4080-9de5-6669c2e5430a",
+      "name": "Log Success2"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 20 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        48,
+        1856
+      ],
+      "id": "ac78863d-6cb9-48cb-aeea-6e80589c1eb6",
+      "name": "Daily Budget Check (8PM)1",
+      "notes": "Fires every day at 8:00 PM. Adjust cron expression to change time."
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yqIVrw4hYGTmRueWhNW43D5n6Lzm13rtZGKstnS5Dpc",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Raw Data",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        304,
+        1856
+      ],
+      "id": "aa342a80-3f67-4a07-bc88-29fdd3f4d268",
+      "name": "Read Data for Daily Alert1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "QEWGpitBnhOb9ARj",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Build Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Send Budget Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Budget Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Read Raw Data from Sheets2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Daily Summary Email": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Summary Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission2": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain2": {
+      "main": [
+        [
+          {
+            "node": "Format Data2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Data2": {
+      "main": [
+        [
+          {
+            "node": "Save to Google Sheets2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Google Sheets2": {
+      "main": [
+        [
+          {
+            "node": "Budget & Recurring Check1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Budget & Recurring Check1": {
+      "main": [
+        [
+          {
+            "node": "Has Budget Alert?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Budget Alert?1": {
+      "main": [
+        [
+          {
+            "node": "Build Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Raw Data from Sheets2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Raw Data from Sheets2": {
+      "main": [
+        [
+          {
+            "node": "Compute Analytics & Build HTML Report2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Analytics & Build HTML Report2": {
+      "main": [
+        [
+          {
+            "node": "Send Report via Gmail2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Report via Gmail2": {
+      "main": [
+        [
+          {
+            "node": "Log Success2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Budget Check (8PM)1": {
+      "main": [
+        [
+          {
+            "node": "Read Data for Daily Alert1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Data for Daily Alert1": {
+      "main": [
+        [
+          {
+            "node": "Build Daily Summary Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "95093459053af3103bc1380207b7a34176ae358a566c0339bb6271f7286969c3"
+  }
+}
